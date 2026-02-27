@@ -107,6 +107,14 @@ class Neo4jAdapter:
 
         return lesson_node
 
+    def get_lessons_for_error(self, error_id):
+        query = (
+            "MATCH (l:Lesson)-[:CAUSED_BY_ERROR]->(e:Error {id: $error_id}) "
+            "RETURN l.id AS lesson_id, l.summary AS summary, l.solution AS solution, l.timestamp AS timestamp"
+        )
+        params = {"error_id": error_id}
+        return self._execute_query(query, params)
+
 # Example Usage (for testing purposes, not part of the module itself)
 if __name__ == "__main__":
     # These should ideally come from environment variables or a config file
@@ -164,6 +172,25 @@ if __name__ == "__main__":
         lesson_timestamp_2 = "2026-02-27T10:00:00Z"
         lesson_node_2 = adapter.create_lesson(lesson_id_2, lesson_summary_2, lesson_solution_2, lesson_timestamp_2, error_id=error_id_2)
         print(f"Lesson created: {lesson_node_2}")
+
+        # --- New MVGOMS Query Examples ---
+        # 5. Get lessons for a specific error
+        print(f"\nGetting lessons for Error ID: {error_id_1}...")
+        lessons_for_error_1 = adapter.get_lessons_for_error(error_id_1)
+        if lessons_for_error_1:
+            for record in lessons_for_error_1:
+                print(f"  Lesson ID: {record['lesson_id']}, Summary: {record['summary']}")
+        else:
+            print(f"  No lessons found for error ID: {error_id_1}")
+
+        print(f"\nGetting lessons for Error ID: {error_id_2}...")
+        lessons_for_error_2 = adapter.get_lessons_for_error(error_id_2)
+        if lessons_for_error_2:
+            for record in lessons_for_error_2:
+                print(f"  Lesson ID: {record['lesson_id']}, Summary: {record['summary']}")
+        else:
+            print(f"  No lessons found for error ID: {error_id_2}")
+
 
     except Exception as e:
         print(f"An error occurred during example usage: {e}")
