@@ -18,7 +18,7 @@ def log_error_to_goms(command, output, error_message, context):
 
         full_description = f"Command: {command}\nOutput: {output}\nError: {error_message}"
 
-        error_node = adapter.create_error(
+        adapter.create_error(
             id=error_id,
             description=full_description,
             timestamp=timestamp,
