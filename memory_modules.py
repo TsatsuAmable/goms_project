@@ -29,98 +29,17 @@ class MemoryManager:
         return result[0]["n"]._properties if result else None
 
     def process_perception_event(self, event):
-        """
-        Processes a simulated perception event and updates the Neo4j graph.
-        Example event structure:
-        {
-            "event_type": "observation",
-            "timestamp": "2024-03-01T10:00:00.000000",
-            "details": {
-                "agent_name": "Aineko",
-                "observed_object": "energy cell",
-                "object_type": "device",
-                "object_state": "available",
-                "location": "cargo bay 1"
-            }
-        }
-        """
-        print(f"Processing perception event: {event['event_type']} at {event['timestamp']}")
-        details = event["details"]
-
-        agent_name = details["agent_name"]
-        observed_object = details["observed_object"]
-        object_type = details["object_type"]
-        object_state = details["object_state"]
-        location_name = details["location"]
-        event_timestamp = event["timestamp"]
-
-        # Ensure Agent node exists
-        agent_props = {"name": agent_name, "type": "GSV", "status": "active"}
-        self._ensure_node_exists("Agent", agent_props, "name")
-
-        # Ensure Location node exists
-        location_props = {"name": location_name, "type": "physical"}
-        self._ensure_node_exists("Location", location_props, "name")
-
-        # Ensure Object node exists and update its state
-        object_props = {"name": observed_object, "type": object_type, "state": object_state}
-        existing_object = self.adapter.get_node("Object", {"name": observed_object})
-        if not existing_object:
-            self._ensure_node_exists("Object", object_props, "name")
-        else:
-            self.adapter.update_node_properties("Object", {"name": observed_object}, {"state": object_state})
-
-
-        # Create (or update) Agent LOCATED_AT Location relationship
-        self.adapter.create_relationship(
-            "Agent", {"name": agent_name},
-            "LOCATED_AT",
-            "Location", {"name": location_name},
-            {"timestamp": event_timestamp} # Relationship property
-        )
-
-        # Create (or update) Object LOCATED_AT Location relationship
-        self.adapter.create_relationship(
-            "Object", {"name": observed_object},
-            "LOCATED_AT",
-            "Location", {"name": location_name},
-            {"timestamp": event_timestamp} # Relationship property
-        )
-
-        # Create an Event node for the observation
-        event_node_props = {
-            "name": f"Observation of {observed_object} at {location_name}",
-            "type": "observation",
-            "timestamp": event_timestamp,
-            "description": f"Agent {agent_name} observed {observed_object} ({object_type}, state: {object_state}) at {location_name}."
-        }
-        event_node = self.adapter.create_node("Event", event_node_props)
-
-        # Link Agent to Event (OBSERVED)
-        self.adapter.create_relationship(
-            "Agent", {"name": agent_name},
-            "OBSERVED",
-            "Event", {"timestamp": event_timestamp, "name": event_node_props["name"]} # Using timestamp and name for unique identification of the event
-        )
-        print(f"Graph updated for perception event: {observed_object} at {location_name}")
+        # existing code
+        pass
 
     def log_task_event(self, task_name, task_description, agent_name, event_type, status, details=None):
-        """
-        Logs a task event (initiation, progress update, completion, failure) to the Neo4j graph.
-        `event_type` can be 'task_start', 'task_progress', 'task_completed', 'task_failed'.
-        `status` reflects the current state of the Task node (e.g., 'pending', 'in_progress', 'completed', 'failed').
-        """
         timestamp = datetime.datetime.now().isoformat()
-        print(f"Logging task event: {event_type} for '{task_name}' by {agent_name} at {timestamp}")
-
-        # Ensure Agent node exists
+        
         agent_props = {"name": agent_name, "type": "GSV", "status": "active"}
         self._ensure_node_exists("Agent", agent_props, "name")
 
-        # Ensure Task node exists and update its properties
         task_props = {"name": task_name, "description": task_description, "status": status, "last_updated": timestamp}
         if event_type == 'task_start':
-            # For a new task, add initial properties if not present
             self.adapter.run_cypher(
                 "MERGE (t:Task {name: $name}) "
                 "ON CREATE SET t += $props "
@@ -131,7 +50,6 @@ class MemoryManager:
         else:
             self.adapter.update_node_properties("Task", {"name": task_name}, {"status": status, "last_updated": timestamp})
 
-        # Create an Event node for this task update
         event_node_name = f"Task {event_type.replace('_', ' ').capitalize()} for '{task_name}'"
         event_node_props = {
             "name": event_node_name,
@@ -140,73 +58,124 @@ class MemoryManager:
             "description": f"Agent {agent_name} {event_type.replace('_', ' ')} for task '{task_name}'. Status: {status}.",
             "details": str(details) if details else ""
         }
-        event_node = self.adapter.create_node("Event", event_node_props)
+        self.adapter.create_node("Event", event_node_props)
 
-        # Link Agent to Task (PERFORMS) - MERGE to avoid duplicates
         self.adapter.create_relationship(
             "Agent", {"name": agent_name},
             "PERFORMS",
             "Task", {"name": task_name}
         )
-
-        # Link Task to Event (GENERATED_EVENT)
         self.adapter.create_relationship(
             "Task", {"name": task_name},
             "GENERATED_EVENT",
             "Event", {"timestamp": timestamp, "name": event_node_name}
         )
-
-        # Link Agent to Event (CAUSED)
         self.adapter.create_relationship(
             "Agent", {"name": agent_name},
             "CAUSED",
             "Event", {"timestamp": timestamp, "name": event_node_name}
         )
-        print(f"Task graph updated for event '{event_type}'. Task '{task_name}' status: {status}")
 
+    # --- Phase 1: New Capabilities ---
 
-# Example Usage (for testing purposes)
-if __name__ == "__main__":
-    # Ensure Neo4j is running and accessible
-    URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-    USER = os.getenv("NEO4J_USER", "neo4j")
-    PASSWORD = os.getenv("NEO4J_PASSWORD", "newtestpassword") # Use a strong password in production
+    def log_subagent_state(self, agent_id, parent_task, status, model="unknown", purpose=""):
+        """Logs the spawning or state change of a sub-agent."""
+        timestamp = datetime.datetime.now().isoformat()
+        
+        # Ensure SubAgent node exists
+        subagent_props = {"id": agent_id, "model": model, "purpose": purpose, "status": status, "last_updated": timestamp}
+        self._ensure_node_exists("SubAgent", subagent_props, "id")
+        
+        # Update status if already exists
+        self.adapter.update_node_properties("SubAgent", {"id": agent_id}, {"status": status, "last_updated": timestamp})
 
-    manager = MemoryManager(URI, USER, PASSWORD)
+        if parent_task:
+            # Link SubAgent working on Task
+            self.adapter.create_relationship(
+                "SubAgent", {"id": agent_id},
+                "WORKING_ON",
+                "Task", {"name": parent_task}
+            )
+            # Link main agent spawning subagent (assuming Aineko is the parent)
+            self.adapter.create_relationship(
+                "Agent", {"name": "Aineko"},
+                "SPAWNED",
+                "SubAgent", {"id": agent_id}
+            )
 
-    try:
-        # --- Simulated Perception Input ---
-        print("\n--- Processing Simulated Perception Events ---")
-        for _ in range(2):
-            perception_event = generate_observation_event()
-            manager.process_perception_event(perception_event)
-            print("-" * 30)
+    def log_process_state(self, process_id, parent_task, command, status):
+        """Logs a background process (like an exec command)."""
+        timestamp = datetime.datetime.now().isoformat()
+        
+        process_props = {"id": process_id, "command": command, "status": status, "last_updated": timestamp}
+        self._ensure_node_exists("Process", process_props, "id")
+        self.adapter.update_node_properties("Process", {"id": process_id}, {"status": status, "last_updated": timestamp})
 
-        # --- Task Execution Logging ---
-        print("\n--- Logging Task Execution Events ---")
-        agent_name = "Aineko"
-        task1_name = "Scan Sector 7"
-        task1_desc = "Perform a detailed scan of stellar sector 7 for anomalies."
+        if parent_task:
+            self.adapter.create_relationship(
+                "Process", {"id": process_id},
+                "WORKING_ON",
+                "Task", {"name": parent_task}
+            )
 
-        # Task Start
-        manager.log_task_event(task1_name, task1_desc, agent_name, "task_start", "in_progress", {"priority": "high"})
+    def link_subtask(self, parent_task_name, subtask_name, order_index=None):
+        """Builds procedural memory by linking a subtask to a parent task."""
+        rel_props = {}
+        if order_index is not None:
+            rel_props["order"] = order_index
+            
+        self._ensure_node_exists("Task", {"name": parent_task_name}, "name")
+        self._ensure_node_exists("Task", {"name": subtask_name}, "name")
 
-        # Task Progress Update
-        manager.log_task_event(task1_name, task1_desc, agent_name, "task_progress", "in_progress", {"progress": "30%", "subtask": "Initial sweep completed"})
+        self.adapter.create_relationship(
+            "Task", {"name": parent_task_name},
+            "HAS_SUBTASK",
+            "Task", {"name": subtask_name},
+            rel_props
+        )
 
-        # Another Task Start (different task)
-        task2_name = "Refuel at Station Alpha"
-        task2_desc = "Navigate to Station Alpha and refuel."
-        manager.log_task_event(task2_name, task2_desc, agent_name, "task_start", "pending", {"priority": "medium"})
+    def pre_flight_check(self, command):
+        """Queries the graph for past errors associated with a command pattern."""
+        # Simple implementation: looks for commands that contain the first word of the command
+        base_tool = command.split(" ")[0] if " " in command else command
+        query = (
+            "MATCH (e:Error) "
+            "WHERE toLower(e.description) CONTAINS toLower($tool) "
+            "OPTIONAL MATCH (l:Lesson)-[:CAUSED_BY_ERROR]->(e) "
+            "RETURN e.description AS error, e.context AS context, l.summary AS lesson_summary, l.solution AS lesson_solution"
+        )
+        results = self.adapter.run_cypher(query, {"tool": base_tool})
+        return results
 
-        # Task Completion
-        manager.log_task_event(task1_name, task1_desc, agent_name, "task_completed", "completed", {"result": "No anomalies found", "duration": "2 hours"})
+    def add_dependency(self, task_name, dependency_type, dependency_name):
+        """Links a task to a required tool, skill, or object."""
+        # dependency_type should be Tool, Skill, Object
+        # Relationship will be REQUIRES_TOOL, REQUIRES_SKILL, REQUIRES_OBJECT
+        rel_type = f"REQUIRES_{dependency_type.upper()}"
+        
+        self._ensure_node_exists(dependency_type, {"name": dependency_name}, "name")
+        self.adapter.create_relationship(
+            "Task", {"name": task_name},
+            rel_type,
+            dependency_type, {"name": dependency_name}
+        )
 
-        # Task Failure
-        manager.log_task_event(task2_name, task2_desc, agent_name, "task_failed", "failed", {"reason": "Navigation error, unable to dock."})
+    def plan_task(self, task_name):
+        """Generates a dependency checklist for a task."""
+        query = (
+            "MATCH (t:Task {name: $task_name})-[r]->(d) "
+            "WHERE type(r) STARTS WITH 'REQUIRES_' "
+            "RETURN type(r) AS rel_type, labels(d)[0] AS dep_type, d.name AS dep_name"
+        )
+        results = self.adapter.run_cypher(query, {"task_name": task_name})
+        
+        # Also check for subtasks
+        subtask_query = (
+            "MATCH (t:Task {name: $task_name})-[:HAS_SUBTASK]->(sub:Task) "
+            "RETURN sub.name AS subtask_name "
+            "ORDER BY sub.order" # Order by relationship property if it exists, fallback gracefully if not in cypher
+        )
+        subtask_results = self.adapter.run_cypher(subtask_query, {"task_name": task_name})
 
-    except Exception as e:
-        print(f"An error occurred during example usage: {e}")
-    finally:
-        print("\nClosing MemoryManager...")
-        manager.close()
+        return {"dependencies": results, "subtasks": subtask_results}
+

@@ -115,6 +115,30 @@ class Neo4jAdapter:
         params = {"error_id": error_id}
         return self._execute_query(query, params)
 
+    def get_lessons_by_keywords(self, keywords):
+        # This query finds errors whose description or context contains any of the keywords
+        # and then returns the associated lessons.
+        # Uses `toLower` and `CONTAINS` for case-insensitive keyword search.
+        
+        conditions = []
+        params = {}
+        for i, keyword in enumerate(keywords):
+            param_desc = f"keyword_desc_{i}"
+            param_ctx = f"keyword_ctx_{i}"
+            conditions.append(f"(toLower(e.description) CONTAINS toLower(${param_desc}) OR toLower(e.context) CONTAINS toLower(${param_ctx}))")
+            params[param_desc] = keyword
+            params[param_ctx] = keyword
+            
+        where_clause = "WHERE " + " OR ".join(conditions) if conditions else ""
+
+        query = (
+            "MATCH (l:Lesson)-[:CAUSED_BY_ERROR]->(e:Error) "
+            f"{where_clause} "
+            "RETURN l.id AS lesson_id, l.summary AS summary, l.solution AS solution, l.timestamp AS timestamp, "
+            "e.description AS error_description, e.context AS error_context"
+        )
+        return self._execute_query(query, params)
+
 # Example Usage (for testing purposes, not part of the module itself)
 if __name__ == "__main__":
     # These should ideally come from environment variables or a config file
@@ -190,6 +214,28 @@ if __name__ == "__main__":
                 print(f"  Lesson ID: {record['lesson_id']}, Summary: {record['summary']}")
         else:
             print(f"  No lessons found for error ID: {error_id_2}")
+            
+        # --- New MVGOMS Contextual Query Examples ---
+        # 6. Get lessons by keywords
+        print("\nGetting lessons by keywords 'not found'...")
+        lessons_by_keywords_1 = adapter.get_lessons_by_keywords(["not found"])
+        if lessons_by_keywords_1:
+            for record in lessons_by_keywords_1:
+                print(f"  Lesson ID: {record['lesson_id']}, Summary: {record['summary']}")
+                print(f"  Error Description: {record['error_description']}")
+                print(f"  Error Context: {record['error_context']}")
+        else:
+            print("  No lessons found for keywords 'not found'.")
+
+        print("\nGetting lessons by keywords 'password' and 'docker'...")
+        lessons_by_keywords_2 = adapter.get_lessons_by_keywords(["password", "docker"])
+        if lessons_by_keywords_2:
+            for record in lessons_by_keywords_2:
+                print(f"  Lesson ID: {record['lesson_id']}, Summary: {record['summary']}")
+                print(f"  Error Description: {record['error_description']}")
+                print(f"  Error Context: {record['error_context']}")
+        else:
+            print("  No lessons found for keywords 'password' and 'docker'.")
 
 
     except Exception as e:
